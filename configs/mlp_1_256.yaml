@@ -1,0 +1,10 @@
+
+num_layers: 
+width: 2000
+dataset: 'cifar10'
+hparas:                                   
+  epochs: 200
+  lr: .001
+  weight_decay: 0.001
+  batch_size: 64
+
