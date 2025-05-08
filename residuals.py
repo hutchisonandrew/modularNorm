@@ -91,7 +91,8 @@ def compute_loss_and_all_layer_gradients(model, batch, device='cuda'):
             layer_gradients[f'layer_{i}'] = module.weight.grad.clone()
         if hasattr(module, 'bias') and module.bias is not None and module.bias.grad is not None:
             layer_gradients[f'{name}.bias'] = module.bias.grad.clone()
-            
+    if len(layer_gradients)!= 2:
+        raise ValueError("Expected 2 layers with gradients, but got {}".format(len(layer_gradients)))
     return loss.item(), layer_gradients
 
 def compute_modular_residual(original_loss, perturbed_loss, gradients, delta_w1, delta_w2, delta_w1_norm, delta_w2_norm):
