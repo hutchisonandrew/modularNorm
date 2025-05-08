@@ -6,6 +6,7 @@ import torchmetrics
 import os
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks import Callback
+from residuals import WeightPerturbationCallback
 
 class MetricsCallback(Callback):
     """Callback to track and save metrics at the end of each epoch."""
@@ -77,13 +78,6 @@ class SaveFinalModelCallback(Callback):
         print(f"Final model saved to {final_model_path}")
 
 
-class ResidualCheckCallback(Callback):
-    """Callback to check the residual of the loss approximation."""
-    def __init__(self, save_dir):
-        super().__init__()
-        self.save_dir = save_dir
-        if not os.path.exists(save_dir):
-            os.makedirs(save_dir)
     
             
 
@@ -184,6 +178,6 @@ def get_callbacks(checkpoint_dir='checkpoints', metrics_dir='metrics'):
     # Create metrics callback
     metrics_callback = MetricsCallback(save_dir=metrics_dir)
     final_model_callback = SaveFinalModelCallback(save_dir=checkpoint_dir)
-    
-    return [metrics_callback, final_model_callback]
+    perturbation_callback = WeightPerturbationCallback(save_dir=f"{metrics_dir}/perturbation_analysis")
+    return [metrics_callback, perturbation_callback, final_model_callback]
 

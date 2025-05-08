@@ -1,9 +1,9 @@
 
-num_layers: 
+num_layers: 2
 width: 2000
 dataset: 'cifar10'
 hparas:                                   
-  epochs: 200
+  epochs: 1
   lr: .001
   weight_decay: 0.001
   batch_size: 64

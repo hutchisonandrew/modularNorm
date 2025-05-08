@@ -1,1 +1,1 @@
-python trainer.py --config configs/mlp_1_256.yaml --output_dir runs/my_experiment
+python trainer.py --config configs/mlp_1_256.yaml --output_dir runs/testrun1
