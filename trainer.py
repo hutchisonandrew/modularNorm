@@ -10,6 +10,9 @@ from CIFAR100_dataset import CIFAR10DataModule, CIFAR100DataModule
 
 
 def main(args):
+    # Set matmul precision for Tensor Cores
+    torch.set_float32_matmul_precision('high')
+
     # Load config file
     with open(args.config, 'r') as file:
         config = yaml.safe_load(file)

@@ -106,7 +106,7 @@ class MLP(pl.LightningModule):
             prev_dim = hidden_dim
         
         # Output layer
-        layers.append(nn.Linear(prev_dim, num_classes))
+        layers.append(nn.Linear(prev_dim, num_classes, bias=False))
         
         self.layers = nn.Sequential(*layers)
         

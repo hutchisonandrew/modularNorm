@@ -9,7 +9,7 @@ import json
 import numpy as np
 import torch.nn.functional as F
 import csv
-
+import tqdm
 
 def compute_updated_loss(model, batch, delta_w1, delta_w2, device='cuda'):
     model.eval()
@@ -38,7 +38,7 @@ def compute_updated_loss(model, batch, delta_w1, delta_w2, device='cuda'):
     
     # Apply perturbation to the first layer
     if layer1_module is not None:
-        layer1_module.weight.data = original_w1 + delta_w1.to(device)
+        layer1_module.weight.data = original_w1 + delta_w1
     else:
         # This case should ideally not be hit if delta_w1 is always meant for an existing layer
         raise ValueError("delta_w1 was provided, but no first layer with weights was found.")
@@ -46,7 +46,7 @@ def compute_updated_loss(model, batch, delta_w1, delta_w2, device='cuda'):
     # Apply perturbation to the second layer if delta_w2 is provided
     if delta_w2 is not None:
         if layer2_module is not None:
-            layer2_module.weight.data = original_w2 + delta_w2.to(device)
+            layer2_module.weight.data = original_w2 + delta_w2
         else:
             # This case should ideally not be hit if delta_w2 is always meant for an existing second layer
             raise ValueError("delta_w2 was provided, but no second layer with weights was found.")
@@ -85,12 +85,12 @@ def compute_loss_and_all_layer_gradients(model, batch, device='cuda'):
 
     loss.backward() 
 
+    current_layer = 0
     layer_gradients = {}
-    for i, (name, module) in enumerate(model.named_modules()):
+    for name, module in model.named_modules():
         if hasattr(module, 'weight') and module.weight is not None and module.weight.grad is not None:
-            layer_gradients[f'layer_{i}'] = module.weight.grad.clone()
-        if hasattr(module, 'bias') and module.bias is not None and module.bias.grad is not None:
-            layer_gradients[f'{name}.bias'] = module.bias.grad.clone()
+            layer_gradients[f'layer_{current_layer}'] = module.weight.grad.clone()
+            current_layer += 1
     if len(layer_gradients)!= 2:
         raise ValueError("Expected 2 layers with gradients, but got {}".format(len(layer_gradients)))
     return loss.item(), layer_gradients
@@ -100,14 +100,19 @@ def compute_modular_residual(original_loss, perturbed_loss, gradients, delta_w1,
     layer0_grad = gradients['layer_0']
     layer1_grad = gradients['layer_1']
     
-    first_order_term = torch.sum(layer0_grad * delta_w1) + torch.sum(layer1_grad * delta_w2)
-    modular_norm = max(delta_w1_norm, delta_w2_norm)
-    rhs = original_loss + first_order_term + modular_norm     
+    # These are GPU tensors/scalars
+    first_order_term_gpu = torch.sum(layer0_grad * delta_w1) + torch.sum(layer1_grad * delta_w2)
+    # delta_w1_norm and delta_w2_norm are GPU scalars (0-dim tensors)
+    modular_norm_gpu = torch.maximum(delta_w1_norm, delta_w2_norm)
     
-    return perturbed_loss - rhs
+    # original_loss and perturbed_loss are CPU floats.
+    # Convert GPU scalars to CPU floats for arithmetic.
+    rhs = original_loss + first_order_term_gpu.item() + modular_norm_gpu.item()
+    
+    return rhs - perturbed_loss
 
-def sample_delta_w(layer_shape, magnitude):
-    delta_w = torch.randn_like(layer_shape)
+def sample_delta_w(layer_shape, magnitude, device):
+    delta_w = torch.randn(layer_shape, device=device)
     delta_w_frobenius = torch.norm(delta_w, p='fro')
     delta_w_spectral = torch.linalg.norm(delta_w, ord=2)
     delta_w = delta_w * magnitude 
@@ -137,7 +142,12 @@ class WeightPerturbationCallback(Callback):
     
     def on_train_epoch_end(self, trainer, pl_module):
         """Analyze weight perturbations at the end of each epoch and save to CSV."""
+        
         epoch = trainer.current_epoch
+        
+        if epoch % 5 != 0:
+            return
+        
         device = pl_module.device
         print(device)
         # Dictionary to store results for this epoch
@@ -162,12 +172,12 @@ class WeightPerturbationCallback(Callback):
         
     
             
-        for i in range(10):
+        for i in tqdm.tqdm(range(60)):
                 # For each perturbation magnitude
-            for magnitude_iter in self.number_of_magnitudes:
+            for magnitude_iter in range(self.number_of_magnitudes):
                     # Generate random perturbation with specified magnitude
-                    delta_w1, delta_w1_frobenius, delta_w1_spectral = sample_delta_w(layer0_shape, first_gradient_magnitudes[magnitude_iter])
-                    delta_w2, delta_w2_frobenius, delta_w2_spectral = sample_delta_w(layer1_shape, second_gradient_magnitudes[magnitude_iter])
+                    delta_w1, delta_w1_frobenius, delta_w1_spectral = sample_delta_w(layer0_shape, first_gradient_magnitudes[magnitude_iter], device)
+                    delta_w2, delta_w2_frobenius, delta_w2_spectral = sample_delta_w(layer1_shape, second_gradient_magnitudes[magnitude_iter], device)
                     # Compute batch-wise losses and gradients on train set
                     updated_loss = compute_updated_loss(pl_module, random_batch, delta_w1, delta_w2, device)
                 
@@ -182,23 +192,26 @@ class WeightPerturbationCallback(Callback):
                         epoch,
                         batch_residual_frobenius,
                         batch_residual_spectral,
-                        delta_w1_spectral,
-                        delta_w1_frobenius,
-                        delta_w2_spectral,
-                        delta_w2_frobenius
+                        delta_w1_spectral.item(),
+                        delta_w1_frobenius.item(),
+                        delta_w2_spectral.item(),
+                        delta_w2_frobenius.item(),
+                        magnitude_iter
                     ]
+    
+                    
                     
                     
                     
            
         # Save the results for this epoch
-        self._save_epoch_results(epoch, data_row)
+                    self._save_epoch_results(data_row)
         
         print(f"Completed weight perturbation analysis for epoch {epoch}")
     
-    def _save_epoch_results(self, data_rows):
-        """Save the collected data rows to a single CSV file."""
-        if not data_rows:
+    def _save_epoch_results(self, data_row):
+        """Save a single data row to the CSV file."""
+        if not data_row: # data_row is a single list representing one row
             return
 
         filepath = os.path.join(self.save_dir, "perturbation_analysis.csv")
@@ -217,11 +230,12 @@ class WeightPerturbationCallback(Callback):
                     'deltaw1_spectral_magnitude',
                     'deltaw1_frobenius_magnitude',
                     'deltaw2_spectral_magnitude',
-                    'deltaw2_frobenius_magnitude'
+                    'deltaw2_frobenius_magnitude',
+                    'magnitude_iteration' # Added new column
                 ]
                 writer.writerow(header)
             
-            writer.writerows(data_rows)
+            writer.writerow(data_row) # Use writerow for a single row
 
 # if __name__ == "__main__":
 #     # Load model
