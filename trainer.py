@@ -26,6 +26,12 @@ def main(args):
     weight_decay = hparas.get('weight_decay', 0.0001)
     batch_size = hparas.get('batch_size', 128)
     
+    experiment_hparas = config.get('experiment_hparas', {})
+    if len(experiment_hparas) == 0:
+        raise ValueError("Experiment hyperparameters are not provided in the config file")
+    num_magnitudes = experiment_hparas.get('num_magnitudes', 10)
+    magnitude_type = experiment_hparas.get('magnitude_type', 'frobenius')
+    
     # Create output directory based on command line argument
     output_dir = args.output_dir
     os.makedirs(output_dir, exist_ok=True)
@@ -69,16 +75,16 @@ def main(args):
         )
     
     # Set up callbacks
-    callbacks = get_callbacks(checkpoint_dir=checkpoint_dir, metrics_dir=metrics_dir)
+    callbacks = get_callbacks(checkpoint_dir=checkpoint_dir, metrics_dir=metrics_dir, num_magnitudes=num_magnitudes, magnitude_type=magnitude_type)
     
     # Set up logger
-    logger = TensorBoardLogger(save_dir=output_dir, name="logs")
+    # logger = TensorBoardLogger(save_dir=output_dir, name="logs") # Disabled
     
     # Set up trainer
     trainer = pl.Trainer(
         max_epochs=epochs,
         callbacks=callbacks,
-        logger=logger,
+        logger=False,  # Disable default logger
         accelerator='gpu' if torch.cuda.is_available() else 'cpu',
         devices=1
     )
@@ -106,6 +112,10 @@ def main(args):
                 'input_dim': input_dim,
                 'hidden_dims': hidden_dims,
                 'num_classes': num_classes
+            },
+            'experiment_hparas': {
+                'num_magnitudes': num_magnitudes,
+                'magnitude_type': magnitude_type
             }
         }
         yaml.dump(full_config, file)

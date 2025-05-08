@@ -101,7 +101,7 @@ class MLP(pl.LightningModule):
         prev_dim = input_dim
         
         for hidden_dim in hidden_dims:
-            layers.append(nn.Linear(prev_dim, hidden_dim))
+            layers.append(nn.Linear(prev_dim, hidden_dim, bias=False))
             layers.append(nn.ReLU())
             prev_dim = hidden_dim
         
@@ -164,7 +164,7 @@ class MLP(pl.LightningModule):
             weight_decay=self.weight_decay
         )
 
-def get_callbacks(checkpoint_dir='checkpoints', metrics_dir='metrics'):
+def get_callbacks(checkpoint_dir='checkpoints', metrics_dir='metrics', num_magnitudes=10, magnitude_type='frobenius'):
     """Helper function to set up callbacks for training."""
     # Create checkpoint callback to save model weights every 5 epochs
     # checkpoint_callback = ModelCheckpoint(
@@ -178,6 +178,6 @@ def get_callbacks(checkpoint_dir='checkpoints', metrics_dir='metrics'):
     # Create metrics callback
     metrics_callback = MetricsCallback(save_dir=metrics_dir)
     final_model_callback = SaveFinalModelCallback(save_dir=checkpoint_dir)
-    perturbation_callback = WeightPerturbationCallback(save_dir=f"{metrics_dir}/perturbation_analysis")
+    perturbation_callback = WeightPerturbationCallback(num_magnitudes=num_magnitudes, magnitude_type=magnitude_type, save_dir=f"{metrics_dir}/perturbation_analysis")
     return [metrics_callback, perturbation_callback, final_model_callback]
 

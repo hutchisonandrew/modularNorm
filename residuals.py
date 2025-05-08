@@ -7,231 +7,220 @@ from CIFAR100_dataset import CIFAR10DataModule, CIFAR100DataModule
 import os
 import json
 import numpy as np
+import torch.nn.functional as F
+import csv
 
 
-def compute_losses(model, dataloader, layer_name, delta_w, device='cpu', max_batches=None):
-    """
-    Compute loss with perturbed weights for a specific layer and compute gradients.
-    Returns per-batch results rather than aggregated values.
-    
-    Args:
-        model: PyTorch model
-        dataloader: DataLoader for dataset
-        layer_name: Name of the layer to perturb (e.g., 'layers.0' for first layer in MLP)
-        delta_w: Weight perturbation tensor (same shape as layer weights)
-        device: Device to run computation on
-        max_batches: Maximum number of batches to process (None for all)
-        
-    Returns:
-        tuple: (original_losses, original_grads, perturbed_losses)
-            - original_losses: List of loss values for each batch with original weights
-            - original_grads: List of gradients for each batch with original weights
-            - perturbed_losses: List of loss values for each batch with perturbed weights
-    """
-    model.eval()  # Set model to evaluation mode but keep gradients enabled
+def compute_updated_loss(model, batch, delta_w1, delta_w2, device='cuda'):
+    model.eval()
     model = model.to(device)
+    x, y = batch
+    x, y = x.to(device), y.to(device)
     
-    # Find the target layer
-    layer = None
-    for name, module in model.named_modules():
-        if name == layer_name and hasattr(module, 'weight'):
-            layer = module
-            break
-    
-    if layer is None:
-        raise ValueError(f"Layer {layer_name} not found in model")
-    
-    # Ensure delta_w has same shape as layer weights
-    if delta_w.shape != layer.weight.shape:
-        raise ValueError(f"delta_w shape {delta_w.shape} does not match layer weight shape {layer.weight.shape}")
-    
-    # Store original weights
-    original_weights = layer.weight.data.clone()
-    # Lists to store per-batch results
-    original_losses = []
-    first_order_terms = []
-    perturbed_losses = []
-    
-    residuals = []
-    # Process batches
-    batch_count = 0
-    
-    # Create iterators
-    data_iter = iter(dataloader)
-
-    # First pass with original weights
-    for _ in range(max_batches):
-        try:
-            batch = next(data_iter)
-            x, y = batch
-            x, y = x.to(device), y.to(device)
-            
-            # Zero gradients
-            model.zero_grad()
-            
-            # Forward pass
-            outputs = model(x)
-            loss = nn.functional.cross_entropy(outputs, y)
-            
-            # Store original loss
-            original_losses.append(loss.item())
-            
-            # Backward pass to compute gradients
-            loss.backward()
-            
-            # Store gradient for this layer
-            gradient = layer.weight.grad.clone()
-            first_order_term = torch.sum(gradient * delta_w)  
-            first_order_terms.append(first_order_term.item())
-            
-            # Increment batch counter
-            batch_count += 1
-        except StopIteration:
-            break
-    
-    # Restore model to clean state
     model.zero_grad()
     
-    # Apply perturbation
-    layer.weight.data = original_weights + delta_w.to(device)
-    
-    # Reset iterator for second pass
-    data_iter = iter(dataloader)
+    layer1_module, layer2_module = None, None
+    original_w1, original_w2 = None, None
 
-    # Second pass with perturbed weights
-    for _ in range(max_batches):
-        try:
-            batch = next(data_iter)
-            x, y = batch
-            x, y = x.to(device), y.to(device)
-            
-            # Forward pass
-            outputs = model(x)
-            loss = nn.functional.cross_entropy(outputs, y)
-            
-            # Store perturbed loss
-            perturbed_losses.append(loss.item())
-            
-            # Increment batch counter
-            batch_count += 1
-        except StopIteration:
-            break
+    # Find the first two layers with weights
+    found_layers_count = 0
+    for name, module in model.named_modules():
+        if hasattr(module, 'weight') and module.weight is not None:
+            if found_layers_count == 0:
+                layer1_module = module
+                original_w1 = layer1_module.weight.data.clone()
+                found_layers_count += 1
+            elif found_layers_count == 1:
+                layer2_module = module
+                original_w2 = layer2_module.weight.data.clone()
+                found_layers_count += 1
+                break # Found both, no need to search further
     
-    # Restore original weights
-    layer.weight.data = original_weights
-    
-    return original_losses, first_order_terms, perturbed_losses
+    # Apply perturbation to the first layer
+    if layer1_module is not None:
+        layer1_module.weight.data = original_w1 + delta_w1.to(device)
+    else:
+        # This case should ideally not be hit if delta_w1 is always meant for an existing layer
+        raise ValueError("delta_w1 was provided, but no first layer with weights was found.")
 
-
-def residual_equation(original_losses, first_order_terms, perturbed_losses, norm):
-    residuals = []
-    for i in range(len(original_losses)):
-        lhs = perturbed_losses[i]
-        rhs = original_losses[i] + first_order_terms[i] + norm
-        residuals.append(rhs - lhs)
-        
-    return residuals
+    # Apply perturbation to the second layer if delta_w2 is provided
+    if delta_w2 is not None:
+        if layer2_module is not None:
+            layer2_module.weight.data = original_w2 + delta_w2.to(device)
+        else:
+            # This case should ideally not be hit if delta_w2 is always meant for an existing second layer
+            raise ValueError("delta_w2 was provided, but no second layer with weights was found.")
     
+    outputs = model(x)
+    loss = F.cross_entropy(outputs, y)
+
+    # Revert model weights
+    if layer1_module is not None and original_w1 is not None:
+        layer1_module.weight.data = original_w1
+    
+    if layer2_module is not None and original_w2 is not None: # original_w2 implies delta_w2 was processed
+        layer2_module.weight.data = original_w2
+    
+    return loss.item()
+
+def compute_gradient_magnitudes(gradients, magnitude_type):
+    if magnitude_type == "frobenius":
+        layer0_magnitude = torch.norm(gradients['layer_0'], p='fro')
+        layer1_magnitude = torch.norm(gradients['layer_1'], p='fro')
+    elif magnitude_type == "spectral":
+        layer0_magnitude = torch.linalg.norm(gradients['layer_0'], ord=2)
+        layer1_magnitude = torch.linalg.norm(gradients['layer_1'], ord=2)
+    return layer0_magnitude, layer1_magnitude
+
+def compute_loss_and_all_layer_gradients(model, batch, device='cuda'):
+    model.eval()  # Keep model in eval mode if not training, but ensure grads are enabled for params
+    model = model.to(device)
+    x, y = batch
+    x, y = x.to(device), y.to(device)
+
+    model.zero_grad()  
+
+    outputs = model(x)
+    loss = F.cross_entropy(outputs, y)
+
+    loss.backward() 
+
+    layer_gradients = {}
+    for i, (name, module) in enumerate(model.named_modules()):
+        if hasattr(module, 'weight') and module.weight is not None and module.weight.grad is not None:
+            layer_gradients[f'layer_{i}'] = module.weight.grad.clone()
+        if hasattr(module, 'bias') and module.bias is not None and module.bias.grad is not None:
+            layer_gradients[f'{name}.bias'] = module.bias.grad.clone()
+            
+    return loss.item(), layer_gradients
+
+def compute_modular_residual(original_loss, perturbed_loss, gradients, delta_w1, delta_w2, delta_w1_norm, delta_w2_norm):
+    
+    layer0_grad = gradients['layer_0']
+    layer1_grad = gradients['layer_1']
+    
+    first_order_term = torch.sum(layer0_grad * delta_w1) + torch.sum(layer1_grad * delta_w2)
+    modular_norm = max(delta_w1_norm, delta_w2_norm)
+    rhs = original_loss + first_order_term + modular_norm     
+    
+    return perturbed_loss - rhs
+
+def sample_delta_w(layer_shape, magnitude):
+    delta_w = torch.randn_like(layer_shape)
+    delta_w_frobenius = torch.norm(delta_w, p='fro')
+    delta_w_spectral = torch.linalg.norm(delta_w, ord=2)
+    delta_w = delta_w * magnitude 
+    delta_w_frobenius = delta_w_frobenius * magnitude
+    delta_w_spectral = delta_w_spectral * magnitude
+    return delta_w, delta_w_frobenius, delta_w_spectral
+  
 class WeightPerturbationCallback(Callback):
     """
     Callback to analyze the effect of weight perturbations on loss at the end of each epoch.
     """
-    def __init__(self, delta_magnitudes=[1.0], save_dir='perturbation_analysis', max_batches=2):
+    def __init__(self, num_magnitudes=10, magnitude_type="frobenius", save_dir='perturbation_analysis'):
         """
         Args:
             layer_names: List of layer names to analyze (e.g., ['layers.0', 'layers.2'])
-            delta_magnitudes: Magnitudes of perturbations to apply
             save_dir: Directory to save results
-            max_batches: Maximum number of batches to analyze (for efficiency)
+
         """
         super().__init__()
-        self.delta_magnitudes = delta_magnitudes
+        self.magnitude_type = magnitude_type
         self.save_dir = save_dir
-        self.max_batches = max_batches
+        self.number_of_magnitudes = num_magnitudes
         
         # Create directory if it doesn't exist
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
     
     def on_train_epoch_end(self, trainer, pl_module):
-        """Analyze weight perturbations at the end of each epoch"""
+        """Analyze weight perturbations at the end of each epoch and save to CSV."""
         epoch = trainer.current_epoch
         device = pl_module.device
-        
+        print(device)
         # Dictionary to store results for this epoch
-        epoch_results = {}
         
-        # Analyze each layer
         
+       
+        
+        #compute gradients and their magnitudes
+        random_batch = next(iter(trainer.train_dataloader))
+        original_loss, layer_gradients = compute_loss_and_all_layer_gradients(pl_module, random_batch, device)
+        layer0_shape = layer_gradients['layer_0'].shape
+        layer1_shape = layer_gradients['layer_1'].shape
+        gradient_mag1, gradient_mag2 = compute_gradient_magnitudes(layer_gradients, self.magnitude_type)
+        
+        
+        #Construct perturbation magnitudes
+        firs_step_size = 0.1 * gradient_mag1 / float(self.number_of_magnitudes)
+        first_gradient_magnitudes = [firs_step_size * i for i in range(1, self.number_of_magnitudes + 1)]
+        
+        second_step_size = 0.1 * gradient_mag2 / float(self.number_of_magnitudes)
+        second_gradient_magnitudes = [second_step_size * i for i in range(1, self.number_of_magnitudes + 1)]
+        
+    
             
-        for layer_name, layer in pl_module.named_modules():
-            if not hasattr(layer, 'weight'):
-                continue
-            
-            for i in range(10):
-                print(f"Analyzing layer {layer_name} and at {i} iteration")
-                delta_w = torch.randn_like(layer.weight.data)
+        for i in range(10):
                 # For each perturbation magnitude
-                for magnitude in self.delta_magnitudes:
+            for magnitude_iter in self.number_of_magnitudes:
                     # Generate random perturbation with specified magnitude
-                # Normalize and scale to desired magnitude
-                    delta_w = delta_w * magnitude 
-                    delta_w_frobenius = torch.norm(delta_w, p='fro')
-                    # Using torch.linalg.norm with ord=2 for spectral norm
-                    delta_w_spectral = torch.linalg.norm(delta_w, ord=2)
-                    
-                    print(f"Delta w frobenius: {delta_w_frobenius}, Delta w spectral: {delta_w_spectral}")
+                    delta_w1, delta_w1_frobenius, delta_w1_spectral = sample_delta_w(layer0_shape, first_gradient_magnitudes[magnitude_iter])
+                    delta_w2, delta_w2_frobenius, delta_w2_spectral = sample_delta_w(layer1_shape, second_gradient_magnitudes[magnitude_iter])
                     # Compute batch-wise losses and gradients on train set
-                    train_orig_losses, train_grads, train_pert_losses = compute_losses(
-                        pl_module, trainer.train_dataloader, layer_name, delta_w, device,
-                        max_batches=self.max_batches
-                    )
+                    updated_loss = compute_updated_loss(pl_module, random_batch, delta_w1, delta_w2, device)
+                
+                    
                     
 
-                    batch_residuals_frobenius = residual_equation(train_orig_losses, train_grads, train_pert_losses, delta_w_frobenius)
-                    batch_residuals_spectral = residual_equation(train_orig_losses, train_grads, train_pert_losses, delta_w_spectral)
+                    batch_residual_frobenius = compute_modular_residual(original_loss, updated_loss, layer_gradients, delta_w1, delta_w2, delta_w1_frobenius, delta_w2_frobenius)
+                    batch_residual_spectral = compute_modular_residual(original_loss, updated_loss, layer_gradients, delta_w1, delta_w2, delta_w1_spectral, delta_w2_spectral)
                     # Store results
-                    if layer_name not in epoch_results:
-                        epoch_results[layer_name] = []
+                    
+                    data_row = [
+                        epoch,
+                        batch_residual_frobenius,
+                        batch_residual_spectral,
+                        delta_w1_spectral,
+                        delta_w1_frobenius,
+                        delta_w2_spectral,
+                        delta_w2_frobenius
+                    ]
                     
                     
-                    # Simply store the original and perturbed losses
-                    result = {
-                        'batch_residuals_frobenius': batch_residuals_frobenius,
-                        'batch_residuals_spectral': batch_residuals_spectral
-                    }
-                    print(result)
                     
-                    epoch_results[layer_name].append(result)
-            break
+           
         # Save the results for this epoch
-        self._save_epoch_results(epoch, epoch_results)
+        self._save_epoch_results(epoch, data_row)
         
         print(f"Completed weight perturbation analysis for epoch {epoch}")
     
-    def _save_epoch_results(self, epoch, epoch_results):
-        """Save the results for a specific epoch to disk"""
-        # Create a serializable version of the results
-        serializable_results = self._make_serializable(epoch_results)
+    def _save_epoch_results(self, data_rows):
+        """Save the collected data rows to a single CSV file."""
+        if not data_rows:
+            return
+
+        filepath = os.path.join(self.save_dir, "perturbation_analysis.csv")
         
-        # Save to a JSON file
-        filename = os.path.join(self.save_dir, f"perturbation_results_epoch_{epoch}.json")
-        with open(filename, 'w') as f:
-            json.dump(serializable_results, f, indent=2)
-    
-    
-    def _make_serializable(self, results):
-        """Convert any non-serializable objects to serializable ones"""
-        if isinstance(results, torch.Tensor):
-            return results.detach().cpu().numpy().tolist()
-        elif isinstance(results, np.ndarray):
-            return results.tolist()
-        elif isinstance(results, dict):
-            return {k: self._make_serializable(v) for k, v in results.items()}
-        elif isinstance(results, list):
-            return [self._make_serializable(item) for item in results]
-        else:
-            return results
+        # Check if file exists to determine if header is needed
+        file_exists = os.path.isfile(filepath)
+        
+        with open(filepath, 'a', newline='') as f:
+            writer = csv.writer(f)
+            # Write header only if file is new
+            if not file_exists:
+                header = [
+                    'epoch',
+                    'frobenius_residual',
+                    'spectral_residual',
+                    'deltaw1_spectral_magnitude',
+                    'deltaw1_frobenius_magnitude',
+                    'deltaw2_spectral_magnitude',
+                    'deltaw2_frobenius_magnitude'
+                ]
+                writer.writerow(header)
+            
+            writer.writerows(data_rows)
 
 # if __name__ == "__main__":
 #     # Load model
