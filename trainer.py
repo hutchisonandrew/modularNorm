@@ -18,22 +18,23 @@ def main(args):
         config = yaml.safe_load(file)
     
     # Extract parameters from config
-    num_layers = config.get('num_layers', 2)
-    width = config.get('width', 512)
-    dataset = config.get('dataset', 'cifar10') 
-    hparas = config.get('hparas', {})
+    num_layers = config['num_layers']
+    width = config['width']
+    dataset = config['dataset']
+    hparas = config['hparas']
     
     # Extract hyperparameters with defaults
-    epochs = hparas.get('epochs', 100)
-    lr = hparas.get('lr', 0.001)
-    weight_decay = hparas.get('weight_decay', 0.0001)
-    batch_size = hparas.get('batch_size', 128)
+    epochs = hparas['epochs']
+    lr = hparas['lr']
+    weight_decay = hparas['weight_decay']
+    batch_size = hparas['batch_size']
     
-    experiment_hparas = config.get('experiment_hparas', {})
+    experiment_hparas = config['experiment_hparas']
     if len(experiment_hparas) == 0:
         raise ValueError("Experiment hyperparameters are not provided in the config file")
-    num_magnitudes = experiment_hparas.get('num_magnitudes', 10)
-    magnitude_type = experiment_hparas.get('magnitude_type', 'frobenius')
+    num_magnitudes = experiment_hparas['num_magnitudes']
+    magnitude_type = experiment_hparas['magnitude_type']
+    optimizer = experiment_hparas['optimizer']
     
     # Create output directory based on command line argument
     output_dir = args.output_dir
@@ -62,7 +63,8 @@ def main(args):
         hidden_dims=hidden_dims,
         num_classes=num_classes,
         learning_rate=lr,
-        weight_decay=weight_decay
+        weight_decay=weight_decay,
+        optimizer=optimizer
     )
     
     # Set up data module

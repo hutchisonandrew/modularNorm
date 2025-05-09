@@ -1,6 +1,6 @@
 
-num_layers: 2
-width: 512
+num_layers: 5
+width: 256
 dataset: 'cifar10'
 hparas:                                   
   epochs: 30
@@ -10,3 +10,4 @@ hparas:
 experiment_hparas:
   num_magnitudes: 10
   magnitude_type: 'frobenius'
+  optimizer: 'AdamW'

@@ -75,6 +75,7 @@ dependencies:
       - pyyaml==6.0.2
       - scikit-learn==1.6.1
       - scipy==1.15.2
+      - seaborn==0.13.2
       - six==1.17.0
       - sympy==1.13.1
       - threadpoolctl==3.6.0

@@ -111,13 +111,19 @@ def compute_modular_residual(original_loss, perturbed_loss, gradients, delta_w1,
     
     return rhs - perturbed_loss
 
-def sample_delta_w(layer_shape, magnitude, device):
+def sample_delta_w(layer_shape, magnitude, device, magnitude_type):
     delta_w = torch.randn(layer_shape, device=device)
     delta_w_frobenius = torch.norm(delta_w, p='fro')
     delta_w_spectral = torch.linalg.norm(delta_w, ord=2)
-    delta_w = delta_w * magnitude 
-    delta_w_frobenius = delta_w_frobenius * magnitude
-    delta_w_spectral = delta_w_spectral * magnitude
+    
+    if magnitude_type == "frobenius":
+        delta_w = delta_w * magnitude / delta_w_frobenius
+        delta_w_spectral =  delta_w_spectral * magnitude / delta_w_frobenius
+        delta_w_frobenius = magnitude
+    elif magnitude_type == "spectral":
+        delta_w = delta_w * magnitude / delta_w_spectral
+        delta_w_frobenius = delta_w_frobenius * magnitude / delta_w_spectral
+        delta_w_spectral = magnitude
     return delta_w, delta_w_frobenius, delta_w_spectral
   
 class WeightPerturbationCallback(Callback):
@@ -132,10 +138,11 @@ class WeightPerturbationCallback(Callback):
 
         """
         super().__init__()
+        
         self.magnitude_type = magnitude_type
         self.save_dir = save_dir
         self.number_of_magnitudes = num_magnitudes
-        
+        print(self.magnitude_type)
         # Create directory if it doesn't exist
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
@@ -164,7 +171,7 @@ class WeightPerturbationCallback(Callback):
         
         
         #Construct perturbation magnitudes
-        firs_step_size = 0.1 * gradient_mag1 / float(self.number_of_magnitudes)
+        firs_step_size = 0.1 *gradient_mag1 / float(self.number_of_magnitudes)
         first_gradient_magnitudes = [firs_step_size * i for i in range(1, self.number_of_magnitudes + 1)]
         
         second_step_size = 0.1 * gradient_mag2 / float(self.number_of_magnitudes)
@@ -176,8 +183,8 @@ class WeightPerturbationCallback(Callback):
                 # For each perturbation magnitude
             for magnitude_iter in range(self.number_of_magnitudes):
                     # Generate random perturbation with specified magnitude
-                    delta_w1, delta_w1_frobenius, delta_w1_spectral = sample_delta_w(layer0_shape, first_gradient_magnitudes[magnitude_iter], device)
-                    delta_w2, delta_w2_frobenius, delta_w2_spectral = sample_delta_w(layer1_shape, second_gradient_magnitudes[magnitude_iter], device)
+                    delta_w1, delta_w1_frobenius, delta_w1_spectral = sample_delta_w(layer0_shape, first_gradient_magnitudes[magnitude_iter], device, self.magnitude_type)
+                    delta_w2, delta_w2_frobenius, delta_w2_spectral = sample_delta_w(layer1_shape, second_gradient_magnitudes[magnitude_iter], device, self.magnitude_type)
                     # Compute batch-wise losses and gradients on train set
                     updated_loss = compute_updated_loss(pl_module, random_batch, delta_w1, delta_w2, device)
                 
