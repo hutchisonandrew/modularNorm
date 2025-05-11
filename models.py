@@ -229,6 +229,7 @@ class MLP(pl.LightningModule):
                 if isinstance(layer, nn.Linear) and layer is not head_layer:
                     for p in layer.parameters():
                         if p.ndim >= 2:
+                            print(f"Adding parameter to Muon: {p.shape}")
                             muon_params.append(p)
                         else:
                             adamw_params.append(p)
@@ -237,7 +238,7 @@ class MLP(pl.LightningModule):
 
             optimizers = []
             if muon_params:
-                optimizers.append(Muon(muon_params, lr=0.02, momentum=0.95, weight_decay=self.weight_decay, rank=0, world_size=1)) # Added weight_decay from self
+                optimizers.append(Muon(muon_params, lr=self.learning_rate, momentum=0.95, weight_decay=self.weight_decay, rank=0, world_size=1)) # Added weight_decay from self
             if adamw_params:
                 optimizers.append(torch.optim.AdamW(adamw_params, lr=self.learning_rate, betas=(0.90, 0.95), weight_decay=self.weight_decay))
             

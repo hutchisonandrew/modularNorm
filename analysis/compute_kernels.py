@@ -1,21 +1,31 @@
+import sys
+import os
+
+# Get the absolute path of the directory containing compute_kernels.py (analysis/)
+current_script_dir = os.path.dirname(os.path.abspath(__file__))
+# Get the parent directory of current_script_dir (project root)
+project_root = os.path.dirname(current_script_dir)
+# Add the project root to sys.path
+if project_root not in sys.path:
+    sys.path.append(project_root)
+
 import torch
 import torchvision
 import torchvision.transforms as transforms
 import numpy as np
 from models import MLP # Assuming models.py is in the same directory or accessible via PYTHONPATH
-import os
 import argparse
+from analysis.load_model import load_mlp_from_experiment # Import the new loader
 
-def get_post_activations(checkpoint_path: str, model_class=MLP, data_root='./workspace/datasets/cifar10'):
+def get_post_activations(experiment_dir: str, data_root='./workspace/datasets/cifar10'):
     """
     Computes the output of the second-to-last Linear layer 
     (e.g., for an MLP like L3(A2(L2(A1(L1(x))))), this would be L2(A1(L1(x))))
     for a given model checkpoint on the CIFAR10 test set.
 
     Args:
-        checkpoint_path (str): Path to the model checkpoint (.pt file).
-        model_class (torch.nn.Module): The class of the model to load.
-                                     Defaults to MLP from models.py.
+        experiment_dir (str): Path to the experiment directory which contains
+                              config.yaml and checkpoints/final_model.pt.
         data_root (str): Root directory for CIFAR10 dataset.
 
     Returns:
@@ -26,7 +36,15 @@ def get_post_activations(checkpoint_path: str, model_class=MLP, data_root='./wor
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    # 2. CIFAR10 Test dataset and DataLoader
+    # 2. Load the model using the new loader function
+    try:
+        model, _ = load_mlp_from_experiment(experiment_dir, device=device.type) # Pass device.type (e.g., "cuda" or "cpu")
+        # The load_mlp_from_experiment function already calls model.eval() and model.to(device)
+    except Exception as e:
+        print(f"Error loading model from experiment directory {experiment_dir}: {e}")
+        return None
+    
+    # 3. CIFAR10 Test dataset and DataLoader
     transform = transforms.Compose([
         transforms.ToTensor(),
         transforms.Normalize((0.4914, 0.4822, 0.4465), (0.2023, 0.1994, 0.2010)) 
@@ -40,39 +58,6 @@ def get_post_activations(checkpoint_path: str, model_class=MLP, data_root='./wor
     # DO NOT SHUFFLE THE TEST SET to ensure consistent order
     testloader = torch.utils.data.DataLoader(testset, batch_size=512, # Batch size can be adjusted
                                              shuffle=False, num_workers=2)
-
-    # 3. Load the model
-    # Assuming the MLP model from models.py.
-    # If your model saves hyperparameters, you might need to load them first
-    # or ensure the model_class instantiation matches the saved model.
-    # For the MLP in models.py, the default parameters should work if not changed during training.
-    model = model_class()
-    
-    # Load the state dict.
-    # The checkpoint might be a PyTorch Lightning checkpoint or a raw PyTorch state_dict.
-    # If it's a Lightning checkpoint, it might contain more than just the state_dict.
-    try:
-        checkpoint = torch.load(checkpoint_path, map_location=device)
-        if 'state_dict' in checkpoint: # Common for PyTorch Lightning
-            state_dict = checkpoint['state_dict']
-    
-            # This should load directly into `model.load_state_dict()`.
-            model.load_state_dict(state_dict)
-        else: # Raw PyTorch state_dict
-            model.load_state_dict(checkpoint)
-        print(f"Model loaded successfully from {checkpoint_path}")
-    except Exception as e:
-        print(f"Error loading model from {checkpoint_path}: {e}")
-        # Fallback: Try to load as if it's a model object itself (less common for .pt)
-        try:
-            model = torch.load(checkpoint_path, map_location=device)
-            print(f"Model loaded directly (treating .pt as full model object) from {checkpoint_path}")
-        except Exception as e2:
-            print(f"Could not load model from checkpoint: {e}, and also {e2}")
-            return None
-            
-    model.to(device)
-    model.eval()
 
     # 4. Register a hook to get the output of the second-to-last Linear layer
     activations = []
@@ -155,20 +140,17 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    print(f"Attempting to compute pre-activations using experiment directory: {args.experiment_dir}")
+    print(f"Attempting to compute activations using experiment directory: {args.experiment_dir}")
 
-    checkpoint_path = os.path.join(args.experiment_dir, 'checkpoints', 'final_model.pt')
-    data_directory = args.data_dir # Using the argument for data directory
+    # Construct checkpoint path for information, though the loader handles it internally.
+    # checkpoint_path_info = os.path.join(args.experiment_dir, 'checkpoints', 'final_model.pt')
+    data_directory = args.data_dir
 
-    print(f"Expecting checkpoint at: {checkpoint_path}")
+    # print(f"Expecting checkpoint at: {checkpoint_path_info}") # Informational only
     print(f"Using data directory: {data_directory}")
 
-    # Call the function directly. 
-    # The function itself (and torch.load) will handle if the checkpoint doesn't exist.
-    # torchvision will handle data download if data_directory is empty or doesn't exist.
     activations_tensor = get_post_activations(
-        checkpoint_path=checkpoint_path,
-        model_class=MLP, # Specify the model class used for the checkpoint
+        experiment_dir=args.experiment_dir,
         data_root=data_directory
     )
 
