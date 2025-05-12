@@ -67,8 +67,8 @@ def save_similarity_results(exp1_name, exp2_name, k, final_MkNN_value, csv_filep
  
 
 if __name__ == "__main__":
-    exp1_name = 'mlp_5_256_adam'
-    exp2_name = 'mlp_5_256_adam2'
+    exp1_name = 'mlp_5_256_muon3'
+    exp2_name = 'mlp_5_256_adam3'
 
     exp1_dir = f'./runs/{exp1_name}'
     exp2_dir = f'./runs/{exp2_name}'

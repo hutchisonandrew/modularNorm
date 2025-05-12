@@ -10,7 +10,7 @@ class CIFAR10DataModule(pl.LightningDataModule):
     def __init__(self, num_workers, batch_size=128):
         super().__init__()
         self.mean = [0.4914, 0.4822, 0.4465]
-        self.std = [0.2023, 0.1994, 0.2010]
+        self.std = [0.2470, 0.2435, 0.2616]
         # transforms.RandomCrop(32,padding=4),
         #                                     transforms.RandomHorizontalFlip(),
         self.transform = transforms.Compose([transforms.ToTensor(),

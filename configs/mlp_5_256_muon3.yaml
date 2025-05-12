@@ -1,0 +1,13 @@
+
+num_layers: 5
+width: 256
+dataset: 'cifar10'
+hparas:                                   
+  epochs: 30
+  lr: .002
+  weight_decay: 0.001
+  batch_size: 64
+experiment_hparas:
+  num_magnitudes: 10
+  magnitude_type: 'frobenius'
+  optimizer: 'Muon'

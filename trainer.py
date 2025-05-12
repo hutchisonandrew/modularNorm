@@ -5,7 +5,8 @@ import torch
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import TensorBoardLogger
 
-from models import MLP, get_callbacks
+from models import MLP
+from callbacks import get_callbacks
 from CIFAR100_dataset import CIFAR10DataModule, CIFAR100DataModule
 
 
@@ -28,6 +29,7 @@ def main(args):
     lr = hparas['lr']
     weight_decay = hparas['weight_decay']
     batch_size = hparas['batch_size']
+    momentum = hparas['momentum']
     
     experiment_hparas = config['experiment_hparas']
     if len(experiment_hparas) == 0:
@@ -64,7 +66,9 @@ def main(args):
         num_classes=num_classes,
         learning_rate=lr,
         weight_decay=weight_decay,
-        optimizer=optimizer
+        momentum=momentum,
+        optimizer=optimizer,
+        
     )
     
     # Set up data module
@@ -120,7 +124,9 @@ def main(args):
             },
             'experiment_hparas': {
                 'num_magnitudes': num_magnitudes,
-                'magnitude_type': magnitude_type
+                'magnitude_type': magnitude_type,
+                'optimizer': optimizer,
+                'momentum': momentum
             }
         }
         yaml.dump(full_config, file)
