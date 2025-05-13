@@ -11,7 +11,7 @@ project_root = os.path.dirname(current_script_dir)
 # Add the project root to sys.path to allow importing 'models'
 if project_root not in sys.path:
     sys.path.append(project_root)
-
+    
 from models import MLP # Assuming models.py is in the project root
 
 def load_mlp_from_experiment(experiment_dir: str, checkpoint_filename: str = "final_model.pt", device: str = "cpu"):
