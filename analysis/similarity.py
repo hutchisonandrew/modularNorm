@@ -348,18 +348,31 @@ class similarityScores:
 
 if __name__ == "__main__":
 
-    activation_tensors = [('mlp_5_256_adam', 'mlp_5_256_adam3', 'mlp_5_256_adam2'), ('mlp_5_256_muon', 'mlp_5_256_muon2', 'mlp_5_256_muon3')]
 
+    ## MLP EXPERIMENTS
+    #save_path = 'analysis/results/mlp'
+    #activation_tensors = [('mlp_5_256_adam', 'mlp_5_256_adam3', 'mlp_5_256_adam2'), ('mlp_5_256_muon', 'mlp_5_256_muon2', 'mlp_5_256_muon3')]
+    #pairs = [['mlp_5_256_adam','mlp_5_256_adam2'],['mlp_5_256_adam2','mlp_5_256_adam3'], ['mlp_5_256_adam','mlp_5_256_adam3'], ['mlp_5_256_muon2', 'mlp_5_256_muon3'],['mlp_5_256_muon', 'mlp_5_256_muon2'], ['mlp_5_256_muon', 'mlp_5_256_muon3']]
+
+    ## VIT EXPERIMENTS
+    save_path = 'analysis/results/vit'
+    activation_tensors = [('vit_adam1', 'vit_adam2', 'vit_adam3'), ('vit_muon1', 'vit_muon2', 'vit_muon3', 'vit_muon4')]
+    pairs = [['vit_adam1','vit_adam2'],['vit_adam2','vit_adam3'],['vit_adam1','vit_adam3'],['vit_muon1','vit_muon2'],['vit_muon2','vit_muon3']]
+   
     similarity_scores = similarityScores(activation_tensors)
+    metric = 'cosine'
 
-    metric = 'euclidean'
-    pairs = [['mlp_5_256_adam','mlp_5_256_adam2'],['mlp_5_256_adam2','mlp_5_256_adam3'], ['mlp_5_256_adam','mlp_5_256_adam3'], ['mlp_5_256_muon2', 'mlp_5_256_muon3'],['mlp_5_256_muon', 'mlp_5_256_muon2'], ['mlp_5_256_muon', 'mlp_5_256_muon3']]
-
-    # EXPERIMENT SUITE
+    ## EXPERIMENT SUITE
 
     # DISTANCE-BASED METRICS
-    similarity_scores.mknn_experiment(pairs, f'analysis/results/mknn_{metric}.png', metric = metric)
-    similarity_scores.jaccard_experiment(pairs, f'analysis/results/jaccard_{metric}.png', metric = metric)
+
+    similarity_scores.mknn_experiment(pairs, save_path + f'/mknn_{metric}', metric = metric)
+    similarity_scores.jaccard_experiment(pairs, save_path + f'/jaccard_{metric}', metric = metric)
     
     # DOT PRODUCT METRICS
-    #similarity_scores.cka_experiment(pairs, f'analysis/results/cka_vs_samples.png')
+
+    similarity_scores.cka_experiment(pairs, save_path + '/cka_vs_samples.png')
+
+
+
+    
