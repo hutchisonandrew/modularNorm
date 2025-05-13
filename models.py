@@ -9,12 +9,6 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.callbacks import Callback
 from muon import Muon
 
-
-
-
-    
-            
-
 class MLP(pl.LightningModule):
     def __init__(
         self, 
@@ -131,7 +125,6 @@ class MLP(pl.LightningModule):
             if head_layer is None:
                 raise ValueError("No Linear layer found in the model")
     
-
             adamw_params.extend(list(head_layer.parameters()))
 
             # Separate body parameters
@@ -150,7 +143,9 @@ class MLP(pl.LightningModule):
             for p in adamw_params:
                 print(f"AdamW param: {p.shape}")
             if muon_params:
-                optimizers.append(Muon(muon_params, lr=self.learning_rate, momentum=self.momentum)) # Added weight_decay from self
+                # Muon doesn't directly use weight_decay in its constructor
+                optimizers.append(Muon(muon_params, lr=self.learning_rate, momentum=self.momentum)) 
+                
             if adamw_params:
                 optimizers.append(torch.optim.AdamW(adamw_params, lr=self.learning_rate, betas=(0.90, 0.95), weight_decay=self.weight_decay))
             
