@@ -18,6 +18,7 @@ import argparse
 from analysis.load_model import load_mlp_from_experiment # Import the new loader
 
 def get_post_activations(experiment_dir: str, data_root='./workspace/datasets/cifar10'):
+
     """
     Computes the output of the second-to-last Linear layer 
     (e.g., for an MLP like L3(A2(L2(A1(L1(x))))), this would be L2(A1(L1(x))))
@@ -85,7 +86,7 @@ def get_post_activations(experiment_dir: str, data_root='./workspace/datasets/ci
         # This case should ideally be covered by the error checks above, but as a safeguard:
         print("Failed to identify the target layer (second-to-last linear layer) to attach hook.")
         return None
-        
+
     print(f"Attaching hook to capture output of layer: {target_hook_layer} (the second-to-last Linear layer)")
     handle = target_hook_layer.register_forward_hook(hook_fn)
 
@@ -96,7 +97,6 @@ def get_post_activations(experiment_dir: str, data_root='./workspace/datasets/ci
             inputs, _ = data
             inputs = inputs.to(device)
             _ = model(inputs) # Forward pass. Activations are captured by the hook.
-            
             # 'activations' list is populated by the hook for each forward pass (batch)
             # We need to extend all_activations_list with the items from 'activations'
             # and then clear 'activations' for the next batch.
@@ -124,6 +124,7 @@ def get_post_activations(experiment_dir: str, data_root='./workspace/datasets/ci
         return None
 
 if __name__ == '__main__':
+
     parser = argparse.ArgumentParser(description="Compute pre-activations from a model checkpoint.")
     parser.add_argument(
         "--experiment_dir", 
@@ -137,7 +138,6 @@ if __name__ == '__main__':
         default='./workspace/datasets/cifar10',
         help="Root directory for the CIFAR10 dataset."
     )
-
     args = parser.parse_args()
 
     print(f"Attempting to compute activations using experiment directory: {args.experiment_dir}")
