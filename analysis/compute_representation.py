@@ -59,6 +59,7 @@ def get_post_activations(experiment_dir: str, data_root='./workspace/datasets/ci
     # DO NOT SHUFFLE THE TEST SET to ensure consistent order
     testloader = torch.utils.data.DataLoader(testset, batch_size=512, # Batch size can be adjusted
                                              shuffle=False, num_workers=2)
+    
 
     # 4. Register a hook to get the output of the second-to-last Linear layer
     activations = []

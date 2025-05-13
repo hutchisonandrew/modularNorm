@@ -147,7 +147,7 @@ class MLP(pl.LightningModule):
                 optimizers.append(Muon(muon_params, lr=self.learning_rate, momentum=self.momentum)) 
                 
             if adamw_params:
-                optimizers.append(torch.optim.AdamW(adamw_params, lr=self.learning_rate, betas=(0.90, 0.95), weight_decay=self.weight_decay))
+                optimizers.append(torch.optim.AdamW(adamw_params, lr=0.001, betas=(0.90, 0.95), weight_decay=self.weight_decay))
             
             if not optimizers: # If no parameters were assigned (e.g. model with no Linear layers or only a head)
                 # Fallback to AdamW for all parameters

@@ -1,0 +1,25 @@
+model_type: "vit"
+dataset: "cifar10"
+img_size: 32
+patch_size:  4
+num_classes: 10
+in_chans: 3
+embed_dim: 256
+depth: 6
+num_heads: 8
+mlp_ratio: 2.0
+dropout: 0.0
+hparas:
+  epochs: 75
+  lr: 0.001
+  weight_decay: 0
+  batch_size: 512
+  momentum: 0.95
+
+experiment_hparas:
+  num_magnitudes: 10
+  magnitude_type: 'frobenius'
+  optimizer: 'Muon'
+
+
+

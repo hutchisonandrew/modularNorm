@@ -96,10 +96,15 @@ class SaveFinalModelCallback(Callback):
             os.makedirs(save_dir)
             
     def on_train_end(self, trainer, pl_module):
+        print("\nEntering SaveFinalModelCallback.on_train_end...") # Debug print
         # Save the final model when training is complete
         final_model_path = os.path.join(self.save_dir, 'final_model.pt')
-        torch.save(pl_module.state_dict(), final_model_path)
-        print(f"Final model saved to {final_model_path}")
+        print(f"Attempting to save final model to: {final_model_path}") # Debug print
+        try:
+            torch.save(pl_module.state_dict(), final_model_path)
+            print(f"Final model successfully saved to {final_model_path}") # Debug print
+        except Exception as e:
+            print(f"Error saving final model: {e}") # Debug print for errors
 
 def get_callbacks(checkpoint_dir='checkpoints', metrics_dir='metrics', num_magnitudes=10, magnitude_type='frobenius'):
     """Helper function to set up callbacks for training."""

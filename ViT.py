@@ -5,47 +5,33 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import pytorch_lightning as pl
+import torchmetrics
 
 
-class LinearPatchEmbed(nn.Module):
-    """Embed image patches with a single Linear layer (no convolution).
-
-    Args:
-        img_size (int): height/width of the input images (assumed square).
-        patch_size (int): height/width of each patch.
-        in_chans (int): number of channels in the input images.
-        embed_dim (int): output embedding dimension per patch.
-    """
-
-    def __init__(self, img_size: int = 224, patch_size: int = 16, in_chans: int = 3, embed_dim: int = 768):
+class PatchEmbedding(nn.Module):
+    def __init__(self, img_size=32, patch_size=4, in_channels=3, embed_dim=192):
         super().__init__()
-        assert img_size % patch_size == 0, "img_size must be divisible by patch_size"
         self.img_size = img_size
         self.patch_size = patch_size
-        self.grid_size = img_size // patch_size
-        self.num_patches = self.grid_size ** 2
-        self.proj = nn.Linear(in_chans * patch_size * patch_size, embed_dim)
+        self.n_patches = (img_size // patch_size) ** 2
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """Forward pass.
+        self.proj = nn.Conv2d(
+            in_channels,
+            embed_dim,
+            kernel_size=patch_size,
+            stride=patch_size
+        )
 
-        Args:
-            x: tensor of shape (B, C, H, W)
-        Returns:
-            tensor of shape (B, N, D) where N = num_patches and D = embed_dim
-        """
-        B, C, H, W = x.shape
-        # (B, C, H, W) -> (B, C, num_patches, patch_size, patch_size)
-        x = x.unfold(2, self.patch_size, self.patch_size).unfold(3, self.patch_size, self.patch_size)
-        x = x.contiguous().view(B, C, -1, self.patch_size, self.patch_size)
-        # (B, C, N, p, p) -> (B, N, C, p, p) -> (B, N, C*p*p)
-        x = x.permute(0, 2, 1, 3, 4).contiguous().view(B, -1, C * self.patch_size * self.patch_size)
-        # (B, N, C*p*p) -> (B, N, embed_dim)
-        x = self.proj(x)
+    def forward(self, x):
+        B = x.shape[0]
+        # Project patches
+        x = self.proj(x)  # (B, embed_dim, H/patch_size, W/patch_size)
+        x = x.flatten(2)  # (B, embed_dim, n_patches)
+        x = x.transpose(1, 2)  # (B, n_patches, embed_dim)
         return x
 
 
-class TranformerMLP(nn.Module):
+class TransformerMLP(nn.Module):
     def __init__(self, in_features: int, hidden_features: Optional[int] = None, out_features: Optional[int] = None, dropout: float = 0.0):
         super().__init__()
         hidden_features = hidden_features or in_features * 4
@@ -83,24 +69,23 @@ class TransformerEncoderLayer(nn.Module):
 
 
 class VisionTransformer(nn.Module):
-    """Minimal ViT variant using Linear patch embedding."""
 
     def __init__(
         self,
-        img_size: int = 224,
-        patch_size: int = 16,
+        img_size: int = 32,
+        patch_size: int = 4,
         in_chans: int = 3,
-        num_classes: int = 1000,
-        embed_dim: int = 768,
-        depth: int = 12,
-        num_heads: int = 12,
-        mlp_ratio: float = 4.0,
-        dropout: float = 0.1,
+        num_classes: int = 10,
+        embed_dim: int = 256,
+        depth: int = 6,
+        num_heads: int = 8,
+        mlp_ratio: float = 2.0,
+        dropout: float = 0.0,
     ):
         super().__init__()
-        self.patch_embed = LinearPatchEmbed(img_size, patch_size, in_chans, embed_dim)
+        self.patch_embed = PatchEmbedding(img_size, patch_size, in_chans, embed_dim)
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.pos_embed = nn.Parameter(torch.zeros(1, 1 + self.patch_embed.num_patches, embed_dim))
+        self.pos_embed = nn.Parameter(torch.zeros(1, 1 + self.patch_embed.n_patches, embed_dim))
         self.pos_drop = nn.Dropout(dropout)
 
         self.blocks = nn.ModuleList([
@@ -139,12 +124,31 @@ class VisionTransformer(nn.Module):
 class LitViT(pl.LightningModule):
     """PyTorch Lightning wrapper for VisionTransformer."""
 
-    def __init__(self, **vit_kwargs):
+    def __init__(self,  
+                 learning_rate=1e-3,
+                 weight_decay=1e-5,
+                 momentum=0.95,
+                 optimizer='AdamW',
+                 **vit_kwargs):
         super().__init__()
+        self.learning_rate = learning_rate
+        self.weight_decay = weight_decay
+        self.optimizer_name = optimizer
+        self.momentum = momentum
+
+        if self.optimizer_name == 'Muon':
+            self.automatic_optimization = False
+        else:
+            self.automatic_optimization = True
+
         self.save_hyperparameters()
         self.model = VisionTransformer(**vit_kwargs)
         self.loss_fn = nn.CrossEntropyLoss()
 
+        self.train_acc = torchmetrics.Accuracy(task="multiclass", num_classes=vit_kwargs['num_classes'])
+        self.val_acc = torchmetrics.Accuracy(task="multiclass", num_classes=vit_kwargs['num_classes'])
+        self.test_acc = torchmetrics.Accuracy(task="multiclass", num_classes=vit_kwargs['num_classes'])
+    
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.model(x)
 
@@ -155,6 +159,17 @@ class LitViT(pl.LightningModule):
         acc = (logits.argmax(dim=-1) == y).float().mean()
         self.log("train_loss", loss, prog_bar=True)
         self.log("train_acc", acc, prog_bar=True)
+        
+        if not self.automatic_optimization:
+            optimizers = self.optimizers()
+            if not isinstance(optimizers, list):
+                optimizers = [optimizers]
+            for opt in optimizers:
+                opt.zero_grad()
+            self.manual_backward(loss)
+            for opt in optimizers:
+                opt.step()
+                
         return loss
 
     def validation_step(self, batch: Tuple[torch.Tensor, torch.Tensor], batch_idx: int):
@@ -164,8 +179,60 @@ class LitViT(pl.LightningModule):
         acc = (logits.argmax(dim=-1) == y).float().mean()
         self.log("val_loss", loss, prog_bar=True)
         self.log("val_acc", acc, prog_bar=True)
+        
+    def test_step(self, batch, batch_idx):
+        x, y = batch
+        logits = self(x)
+        loss = F.cross_entropy(logits, y)
+        
+        # Log metrics
+        self.test_acc(logits, y)
+        self.log('test_loss', loss)
+        self.log('test_acc', self.test_acc)
+        
+        return loss
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), lr=3e-4, weight_decay=0.05)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=100)
-        return [optimizer], [scheduler]
+        if self.optimizer_name == 'AdamW':
+            optimizer = torch.optim.AdamW(self.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
+            return optimizer
+        elif self.optimizer_name == 'Muon':
+            from muon import Muon
+            
+            muon_params = []
+            adamw_params = []
+            
+            # Identify the head layer (classification layer)
+            head_layer = self.model.head
+            
+            # Add head parameters to AdamW
+            adamw_params.extend(list(head_layer.parameters()))
+            
+            # Process all other parameters
+            for name, module in self.model.named_children():
+                if module is not head_layer:
+                    for p in module.parameters():
+                        if p.ndim >= 2:
+                            print(f"Muon param: {p.shape}")
+                            muon_params.append(p)
+                        else:
+                            print(f"AdamW param: {p.shape}")
+                            adamw_params.append(p)
+            
+            optimizers = []
+            
+            if muon_params:
+                optimizers.append(Muon(muon_params, lr=self.learning_rate, momentum=self.momentum))
+                
+            if adamw_params:
+                optimizers.append(torch.optim.AdamW(
+                    adamw_params, 
+                    lr=0.001, 
+                    betas=(0.90, 0.95),
+                    weight_decay=self.weight_decay
+                ))
+            
+            if not optimizers:
+                raise ValueError("No parameters were assigned to the optimizer")
+            
+            return optimizers
